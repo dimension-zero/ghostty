@@ -20,6 +20,7 @@ const CoreInspector = @import("../inspector/main.zig").Inspector;
 const CoreSurface = @import("../Surface.zig");
 const configpkg = @import("../config.zig");
 const Config = configpkg.Config;
+const socket_ipc = @import("ipc/main.zig");
 
 const log = std.log.scoped(.embedded_window);
 
@@ -122,6 +123,9 @@ pub const App = struct {
     /// The configuration for the app. This is owned by this structure.
     config: Config,
 
+    /// IPC socket server for CLI communication.
+    ipc_server: ?socket_ipc.Server = null,
+
     pub fn init(
         self: *App,
         core_app: *CoreApp,
@@ -141,12 +145,66 @@ pub const App = struct {
             .config = config_clone,
             .opts = opts,
             .keymap = keymap,
+            .ipc_server = null,
         };
+
+        // Initialize IPC server for CLI communication
+        self.startIpcServer();
+    }
+
+    /// Start the IPC socket server for CLI communication.
+    fn startIpcServer(self: *App) void {
+        const alloc = self.core_app.alloc;
+
+        var server = socket_ipc.Server.init(alloc, self) catch |err| {
+            log.warn("IPC server init failed: {}", .{err});
+            return;
+        };
+
+        // Register built-in handlers
+        server.registerHandler("echo", socket_ipc.server.echoHandler) catch {};
+        // TODO: Register get_cwd, new_tab, list_windows, etc.
+
+        server.start() catch |err| {
+            log.warn("IPC server start failed: {}", .{err});
+            server.stop();
+            return;
+        };
+
+        self.ipc_server = server;
+        log.info("IPC server started", .{});
     }
 
     pub fn terminate(self: *App) void {
+        // Stop IPC server
+        if (self.ipc_server) |*server| {
+            server.stop();
+        }
+        self.ipc_server = null;
+
         self.keymap.deinit();
         self.config.deinit();
+    }
+
+    /// Get the IPC socket file descriptor for external event loop integration.
+    /// Returns -1 if the IPC server is not running.
+    /// The Swift layer can watch this fd with GCD/kqueue and call handleIpcConnection
+    /// when data is available.
+    pub fn getIpcFd(self: *const App) std.posix.fd_t {
+        if (self.ipc_server) |server| {
+            return server.getFd();
+        }
+        return -1;
+    }
+
+    /// Handle an incoming IPC connection. This should be called by the Swift layer
+    /// when the IPC socket fd becomes readable.
+    pub fn handleIpcConnection(self: *App) void {
+        if (self.ipc_server) |*server| {
+            server.acceptAndHandle() catch |err| {
+                log.debug("IPC handle error: {}", .{err});
+            };
+        }
     }
 
     /// Returns true if there are any global keybinds in the configuration.

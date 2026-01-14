@@ -26,6 +26,7 @@ const CoreSurface = @import("../../../Surface.zig");
 
 const ext = @import("../ext.zig");
 const key = @import("../key.zig");
+const socket_ipc = @import("../../ipc/main.zig");
 const adw_version = @import("../adw_version.zig");
 const gtk_version = @import("../gtk_version.zig");
 const winprotopkg = @import("../winproto.zig");
@@ -206,6 +207,12 @@ pub const Application = extern struct {
 
         /// glib source for our signal handler.
         signal_source: ?c_uint = null,
+
+        /// IPC socket server for CLI communication.
+        ipc_server: ?socket_ipc.Server = null,
+
+        /// GLib source ID for IPC socket polling.
+        ipc_source: ?c_uint = null,
 
         /// CSS Provider for any styles based on Ghostty configuration values.
         css_provider: *gtk.CssProvider,
@@ -416,6 +423,15 @@ pub const Application = extern struct {
     pub fn deinit(self: *Self) void {
         const alloc = self.allocator();
         const priv = self.private();
+
+        // Clean up IPC server
+        if (priv.ipc_source) |source| {
+            _ = glib.Source.remove(source);
+        }
+        if (priv.ipc_server) |*server| {
+            server.stop();
+        }
+
         priv.config.unref();
         priv.winproto.deinit(alloc);
         priv.global_shortcuts.unref();
@@ -1300,6 +1316,9 @@ pub const Application = extern struct {
             ) catch {};
         };
 
+        // Setup IPC socket server for CLI communication
+        self.startupIpcServer();
+
         // If we have any config diagnostics from loading, then we
         // show the diagnostics dialog. We show this one as a general
         // modal (not to any specific window) because we don't even
@@ -1499,6 +1518,60 @@ pub const Application = extern struct {
         priv.transient_cgroup_base = path;
     }
 
+    /// Start the IPC socket server for CLI communication.
+    fn startupIpcServer(self: *Self) void {
+        const priv = self.private();
+        const alloc = priv.core_app.alloc;
+
+        // Initialize the server
+        var server = socket_ipc.Server.init(alloc, self) catch |err| {
+            log.warn("IPC server init failed: {}", .{err});
+            return;
+        };
+
+        // Register built-in handlers
+        server.registerHandler("echo", socket_ipc.server.echoHandler) catch {};
+        // TODO: Register get_cwd, new_tab, list_windows, etc.
+
+        // Start listening
+        server.start() catch |err| {
+            log.warn("IPC server start failed: {}", .{err});
+            server.stop();
+            return;
+        };
+
+        // Add socket fd to GLib main loop for polling
+        priv.ipc_source = glib.unixFdAdd(
+            server.getFd(),
+            .{ .in = true },
+            handleIpcConnection,
+            self,
+        );
+
+        priv.ipc_server = server;
+        log.info("IPC server started", .{});
+    }
+
+    /// Handle incoming IPC connection from GLib main loop.
+    fn handleIpcConnection(
+        fd: std.posix.fd_t,
+        _: glib.IOCondition,
+        user_data: ?*anyopaque,
+    ) callconv(.c) c_int {
+        _ = fd;
+        const self: *Self = @ptrCast(@alignCast(user_data orelse
+            return @intFromBool(glib.SOURCE_CONTINUE)));
+        const priv = self.private();
+
+        if (priv.ipc_server) |*server| {
+            server.acceptAndHandle() catch |err| {
+                log.debug("IPC handle error: {}", .{err});
+            };
+        }
+
+        return @intFromBool(glib.SOURCE_CONTINUE);
+    }
+
     fn activate(self: *Self) callconv(.c) void {
         log.debug("activate", .{});
 
@@ -1527,6 +1600,12 @@ pub const Application = extern struct {
                 log.warn("unable to remove signal source", .{});
             }
             priv.signal_source = null;
+        }
+        if (priv.ipc_source) |v| {
+            if (glib.Source.remove(v) == 0) {
+                log.warn("unable to remove IPC source", .{});
+            }
+            priv.ipc_source = null;
         }
 
         gobject.Object.virtual_methods.dispose.call(

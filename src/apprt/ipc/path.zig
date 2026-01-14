@@ -8,6 +8,11 @@ const Allocator = std.mem.Allocator;
 
 const log = std.log.scoped(.ipc_path);
 
+/// Platform-specific C imports for getuid().
+const c = @cImport({
+    @cInclude("unistd.h");
+});
+
 /// Maximum path length for Unix domain sockets.
 /// Linux: 108 bytes, macOS: 104 bytes. We use the smaller value.
 pub const max_path_len = 104;
@@ -28,7 +33,7 @@ pub const PathError = error{
 ///
 /// The returned path is owned by the caller and must be freed.
 pub fn getSocketPath(alloc: Allocator) (Allocator.Error || PathError)![:0]const u8 {
-    const uid = std.os.linux.getuid();
+    const uid = getUid();
     return getSocketPathForUid(alloc, uid);
 }
 
@@ -71,15 +76,7 @@ fn getSocketDir() ?[]const u8 {
 
 /// Get the current user's UID.
 pub fn getUid() u32 {
-    return switch (builtin.target.os.tag) {
-        .linux => std.os.linux.getuid(),
-        .macos, .ios, .tvos, .watchos, .visionos => blk: {
-            // On Darwin, use libc getuid
-            const c = @cImport(@cInclude("unistd.h"));
-            break :blk c.getuid();
-        },
-        else => 0, // Unsupported platform
-    };
+    return c.getuid();
 }
 
 test "getSocketDir returns non-null" {
