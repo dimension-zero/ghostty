@@ -22,6 +22,7 @@ const new_window = @import("new_window.zig");
 const get_cwd = @import("get_cwd.zig");
 const new_tab = @import("new_tab.zig");
 const list_windows = @import("list_windows.zig");
+const new_split = @import("new_split.zig");
 
 /// Special commands that can be invoked via CLI flags. These are all
 /// invoked by using `+<action>` as a CLI flag. The only exception is
@@ -80,6 +81,9 @@ pub const Action = enum {
 
     // List all open windows and their tabs.
     @"list-windows",
+
+    // Create a new split in the focused terminal.
+    @"new-split",
 
     pub fn detectSpecialCase(arg: []const u8) ?SpecialCase(Action) {
         // If we see a "-e" and we haven't seen a command yet, then
@@ -162,6 +166,7 @@ pub const Action = enum {
             .@"get-cwd" => try get_cwd.run(alloc),
             .@"new-tab" => try new_tab.run(alloc),
             .@"list-windows" => try list_windows.run(alloc),
+            .@"new-split" => try new_split.run(alloc),
         };
     }
 
@@ -204,6 +209,7 @@ pub const Action = enum {
                 .@"get-cwd" => get_cwd.Options,
                 .@"new-tab" => new_tab.Options,
                 .@"list-windows" => list_windows.Options,
+                .@"new-split" => new_split.Options,
             };
         }
     }

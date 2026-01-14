@@ -1538,6 +1538,7 @@ pub const Application = extern struct {
         server.registerHandler("close_window", ipcCloseWindowHandler) catch {};
         server.registerHandler("goto_tab", ipcGotoTabHandler) catch {};
         server.registerHandler("toggle_fullscreen", ipcToggleFullscreenHandler) catch {};
+        server.registerHandler("new_split", ipcNewSplitHandler) catch {};
 
         // Start listening
         server.start() catch |err| {
@@ -1931,6 +1932,43 @@ pub const Application = extern struct {
 
         if (!result) {
             return socket_ipc.protocol.Response.err("Unable to toggle fullscreen");
+        }
+
+        return socket_ipc.protocol.Response.okEmpty();
+    }
+
+    /// IPC handler for new_split action.
+    fn ipcNewSplitHandler(
+        ctx: *anyopaque,
+        _: std.mem.Allocator,
+        params: ?std.json.Value,
+    ) socket_ipc.protocol.Response {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        const priv = self.private();
+
+        const surface = priv.core_app.focusedSurface() orelse {
+            return socket_ipc.protocol.Response.err("No focused surface");
+        };
+
+        // Parse direction from params (default: "right")
+        const direction: apprt.action.SplitDirection = if (params) |p| blk: {
+            if (p != .object) break :blk .right;
+            const dir_val = p.object.get("direction") orelse break :blk .right;
+            if (dir_val != .string) break :blk .right;
+            const dir_str = dir_val.string;
+            if (std.mem.eql(u8, dir_str, "down")) break :blk .down;
+            if (std.mem.eql(u8, dir_str, "left")) break :blk .left;
+            if (std.mem.eql(u8, dir_str, "up")) break :blk .up;
+            break :blk .right;
+        } else .right;
+
+        const result = self.performAction(.{ .surface = surface }, .new_split, direction) catch |err| {
+            log.warn("new_split action failed: {}", .{err});
+            return socket_ipc.protocol.Response.err("Failed to create split");
+        };
+
+        if (!result) {
+            return socket_ipc.protocol.Response.err("Unable to create split");
         }
 
         return socket_ipc.protocol.Response.okEmpty();

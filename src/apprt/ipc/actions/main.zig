@@ -10,6 +10,7 @@ pub const close_tab = @import("close_tab.zig");
 pub const close_window = @import("close_window.zig");
 pub const goto_tab = @import("goto_tab.zig");
 pub const toggle_fullscreen = @import("toggle_fullscreen.zig");
+pub const new_split = @import("new_split.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());
