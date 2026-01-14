@@ -16,12 +16,11 @@ pub const Options = struct {
     /// Output in JSON format for scripting.
     json: bool = false,
 
-    // Future options (currently not implemented by the action):
-    // /// Command to run in the new tab.
-    // @"command": ?[:0]const u8 = null,
-    //
-    // /// Working directory for the new tab.
-    // cwd: ?[:0]const u8 = null,
+    /// Working directory for the new tab.
+    cwd: ?[]const u8 = null,
+
+    /// Command to run in the new tab (use -e for compatibility with other terminals).
+    e: ?[]const u8 = null,
 
     /// Enables "-h" and "--help" to work.
     pub fn help(self: Options) !void {
@@ -102,8 +101,27 @@ fn runArgs(
         return 1;
     }
 
+    // Build request params if cwd or command specified
+    var params: ?std.json.Value = null;
+    if (opts.cwd != null or opts.e != null) {
+        var params_obj = std.json.ObjectMap.init(alloc);
+        if (opts.cwd) |cwd| {
+            params_obj.put("cwd", .{ .string = cwd }) catch {
+                stderr.writeAll("Out of memory\n") catch {};
+                return 1;
+            };
+        }
+        if (opts.e) |cmd| {
+            params_obj.put("command", .{ .string = cmd }) catch {
+                stderr.writeAll("Out of memory\n") catch {};
+                return 1;
+            };
+        }
+        params = .{ .object = params_obj };
+    }
+
     // Send the new_tab request
-    const response = cli_ipc.call(alloc, "new_tab", null) catch |err| {
+    const response = cli_ipc.call(alloc, "new_tab", params) catch |err| {
         if (opts.json) {
             stdout.print("{{\"success\":false,\"error\":\"{}\"}}\n", .{err}) catch {};
         } else {

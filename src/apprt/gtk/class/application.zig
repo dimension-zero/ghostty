@@ -1594,10 +1594,27 @@ pub const Application = extern struct {
     fn ipcNewTabHandler(
         ctx: *anyopaque,
         _: std.mem.Allocator,
-        _: ?std.json.Value,
+        params: ?std.json.Value,
     ) socket_ipc.protocol.Response {
         const self: *Self = @ptrCast(@alignCast(ctx));
         const priv = self.private();
+
+        // Parse optional cwd and command params (for future use)
+        // Note: The core new_tab action doesn't yet support these parameters
+        if (params) |p| {
+            if (p == .object) {
+                if (p.object.get("cwd")) |cwd_val| {
+                    if (cwd_val == .string) {
+                        log.debug("new_tab requested with cwd: {s} (not yet implemented)", .{cwd_val.string});
+                    }
+                }
+                if (p.object.get("command")) |cmd_val| {
+                    if (cmd_val == .string) {
+                        log.debug("new_tab requested with command: {s} (not yet implemented)", .{cmd_val.string});
+                    }
+                }
+            }
+        }
 
         // Get the focused surface to determine which window to create tab in
         const surface = priv.core_app.focusedSurface() orelse {
