@@ -1529,9 +1529,9 @@ pub const Application = extern struct {
             return;
         };
 
-        // Register built-in handlers
+        // Register action handlers
         server.registerHandler("echo", socket_ipc.server.echoHandler) catch {};
-        // TODO: Register get_cwd, new_tab, list_windows, etc.
+        server.registerHandler("get_cwd", ipcGetCwdHandler) catch {};
 
         // Start listening
         server.start() catch |err| {
@@ -1570,6 +1570,17 @@ pub const Application = extern struct {
         }
 
         return @intFromBool(glib.SOURCE_CONTINUE);
+    }
+
+    /// IPC handler for get_cwd action.
+    fn ipcGetCwdHandler(
+        ctx: *anyopaque,
+        alloc: std.mem.Allocator,
+        _: ?std.json.Value,
+    ) socket_ipc.protocol.Response {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        const priv = self.private();
+        return socket_ipc.actions.get_cwd.getCwd(priv.core_app, alloc);
     }
 
     fn activate(self: *Self) callconv(.c) void {

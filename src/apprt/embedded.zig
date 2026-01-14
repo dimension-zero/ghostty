@@ -161,9 +161,9 @@ pub const App = struct {
             return;
         };
 
-        // Register built-in handlers
+        // Register action handlers
         server.registerHandler("echo", socket_ipc.server.echoHandler) catch {};
-        // TODO: Register get_cwd, new_tab, list_windows, etc.
+        server.registerHandler("get_cwd", ipcGetCwdHandler) catch {};
 
         server.start() catch |err| {
             log.warn("IPC server start failed: {}", .{err});
@@ -205,6 +205,16 @@ pub const App = struct {
                 log.debug("IPC handle error: {}", .{err});
             };
         }
+    }
+
+    /// IPC handler for get_cwd action.
+    fn ipcGetCwdHandler(
+        ctx: *anyopaque,
+        alloc: std.mem.Allocator,
+        _: ?std.json.Value,
+    ) socket_ipc.protocol.Response {
+        const self: *App = @ptrCast(@alignCast(ctx));
+        return socket_ipc.actions.get_cwd.getCwd(self.core_app, alloc);
     }
 
     /// Returns true if there are any global keybinds in the configuration.
