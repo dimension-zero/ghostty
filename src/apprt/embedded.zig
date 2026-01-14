@@ -164,6 +164,7 @@ pub const App = struct {
         // Register action handlers
         server.registerHandler("echo", socket_ipc.server.echoHandler) catch {};
         server.registerHandler("get_cwd", ipcGetCwdHandler) catch {};
+        server.registerHandler("new_tab", ipcNewTabHandler) catch {};
 
         server.start() catch |err| {
             log.warn("IPC server start failed: {}", .{err});
@@ -215,6 +216,32 @@ pub const App = struct {
     ) socket_ipc.protocol.Response {
         const self: *App = @ptrCast(@alignCast(ctx));
         return socket_ipc.actions.get_cwd.getCwd(self.core_app, alloc);
+    }
+
+    /// IPC handler for new_tab action.
+    fn ipcNewTabHandler(
+        ctx: *anyopaque,
+        _: std.mem.Allocator,
+        _: ?std.json.Value,
+    ) socket_ipc.protocol.Response {
+        const self: *App = @ptrCast(@alignCast(ctx));
+
+        // Get the focused surface to determine which window to create tab in
+        const surface = self.core_app.focusedSurface() orelse {
+            return socket_ipc.protocol.Response.err("No focused surface");
+        };
+
+        // Perform the new_tab action through the embedded app's performAction
+        const result = self.performAction(.{ .surface = surface }, .new_tab, {}) catch |err| {
+            log.warn("new_tab action failed: {}", .{err});
+            return socket_ipc.protocol.Response.err("Failed to create tab");
+        };
+
+        if (!result) {
+            return socket_ipc.protocol.Response.err("Unable to create tab");
+        }
+
+        return socket_ipc.protocol.Response.okEmpty();
     }
 
     /// Returns true if there are any global keybinds in the configuration.
