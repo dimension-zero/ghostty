@@ -1534,6 +1534,10 @@ pub const Application = extern struct {
         server.registerHandler("get_cwd", ipcGetCwdHandler) catch {};
         server.registerHandler("new_tab", ipcNewTabHandler) catch {};
         server.registerHandler("list_windows", ipcListWindowsHandler) catch {};
+        server.registerHandler("close_tab", ipcCloseTabHandler) catch {};
+        server.registerHandler("close_window", ipcCloseWindowHandler) catch {};
+        server.registerHandler("goto_tab", ipcGotoTabHandler) catch {};
+        server.registerHandler("toggle_fullscreen", ipcToggleFullscreenHandler) catch {};
 
         // Start listening
         server.start() catch |err| {
@@ -1674,6 +1678,139 @@ pub const Application = extern struct {
         }
 
         return socket_ipc.actions.list_windows.buildResponse(alloc, window_infos.items);
+    }
+
+    /// IPC handler for close_tab action.
+    fn ipcCloseTabHandler(
+        ctx: *anyopaque,
+        _: std.mem.Allocator,
+        params: ?std.json.Value,
+    ) socket_ipc.protocol.Response {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        const priv = self.private();
+
+        const surface = priv.core_app.focusedSurface() orelse {
+            return socket_ipc.protocol.Response.err("No focused surface");
+        };
+
+        // Parse mode from params (default: "this")
+        const mode: apprt.action.CloseTabMode = if (params) |p| blk: {
+            if (p != .object) break :blk .this;
+            const mode_val = p.object.get("mode") orelse break :blk .this;
+            if (mode_val != .string) break :blk .this;
+            const mode_str = mode_val.string;
+            if (std.mem.eql(u8, mode_str, "other")) break :blk .other;
+            if (std.mem.eql(u8, mode_str, "right")) break :blk .right;
+            break :blk .this;
+        } else .this;
+
+        const result = self.performAction(.{ .surface = surface }, .close_tab, mode) catch |err| {
+            log.warn("close_tab action failed: {}", .{err});
+            return socket_ipc.protocol.Response.err("Failed to close tab");
+        };
+
+        if (!result) {
+            return socket_ipc.protocol.Response.err("Unable to close tab");
+        }
+
+        return socket_ipc.protocol.Response.okEmpty();
+    }
+
+    /// IPC handler for close_window action.
+    fn ipcCloseWindowHandler(
+        ctx: *anyopaque,
+        _: std.mem.Allocator,
+        _: ?std.json.Value,
+    ) socket_ipc.protocol.Response {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        const priv = self.private();
+
+        const surface = priv.core_app.focusedSurface() orelse {
+            return socket_ipc.protocol.Response.err("No focused surface");
+        };
+
+        const result = self.performAction(.{ .surface = surface }, .close_window, {}) catch |err| {
+            log.warn("close_window action failed: {}", .{err});
+            return socket_ipc.protocol.Response.err("Failed to close window");
+        };
+
+        if (!result) {
+            return socket_ipc.protocol.Response.err("Unable to close window");
+        }
+
+        return socket_ipc.protocol.Response.okEmpty();
+    }
+
+    /// IPC handler for goto_tab action.
+    fn ipcGotoTabHandler(
+        ctx: *anyopaque,
+        _: std.mem.Allocator,
+        params: ?std.json.Value,
+    ) socket_ipc.protocol.Response {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        const priv = self.private();
+
+        const surface = priv.core_app.focusedSurface() orelse {
+            return socket_ipc.protocol.Response.err("No focused surface");
+        };
+
+        // Parse index from params (default: -2 = next)
+        const index: i32 = if (params) |p| blk: {
+            if (p != .object) break :blk -2;
+            const idx_val = p.object.get("index") orelse break :blk -2;
+            if (idx_val != .integer) break :blk -2;
+            break :blk @intCast(idx_val.integer);
+        } else -2;
+
+        const goto_tab: apprt.action.GotoTab = @enumFromInt(index);
+
+        const result = self.performAction(.{ .surface = surface }, .goto_tab, goto_tab) catch |err| {
+            log.warn("goto_tab action failed: {}", .{err});
+            return socket_ipc.protocol.Response.err("Failed to switch tab");
+        };
+
+        if (!result) {
+            return socket_ipc.protocol.Response.err("Unable to switch tab");
+        }
+
+        return socket_ipc.protocol.Response.okEmpty();
+    }
+
+    /// IPC handler for toggle_fullscreen action.
+    fn ipcToggleFullscreenHandler(
+        ctx: *anyopaque,
+        _: std.mem.Allocator,
+        params: ?std.json.Value,
+    ) socket_ipc.protocol.Response {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        const priv = self.private();
+
+        const surface = priv.core_app.focusedSurface() orelse {
+            return socket_ipc.protocol.Response.err("No focused surface");
+        };
+
+        // Parse mode from params (default: "native")
+        const mode: apprt.action.Fullscreen = if (params) |p| blk: {
+            if (p != .object) break :blk .native;
+            const mode_val = p.object.get("mode") orelse break :blk .native;
+            if (mode_val != .string) break :blk .native;
+            const mode_str = mode_val.string;
+            if (std.mem.eql(u8, mode_str, "macos_non_native")) break :blk .macos_non_native;
+            if (std.mem.eql(u8, mode_str, "macos_non_native_visible_menu")) break :blk .macos_non_native_visible_menu;
+            if (std.mem.eql(u8, mode_str, "macos_non_native_padded_notch")) break :blk .macos_non_native_padded_notch;
+            break :blk .native;
+        } else .native;
+
+        const result = self.performAction(.{ .surface = surface }, .toggle_fullscreen, mode) catch |err| {
+            log.warn("toggle_fullscreen action failed: {}", .{err});
+            return socket_ipc.protocol.Response.err("Failed to toggle fullscreen");
+        };
+
+        if (!result) {
+            return socket_ipc.protocol.Response.err("Unable to toggle fullscreen");
+        }
+
+        return socket_ipc.protocol.Response.okEmpty();
     }
 
     fn activate(self: *Self) callconv(.c) void {
