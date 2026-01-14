@@ -165,6 +165,7 @@ pub const App = struct {
         server.registerHandler("echo", socket_ipc.server.echoHandler) catch {};
         server.registerHandler("get_cwd", ipcGetCwdHandler) catch {};
         server.registerHandler("new_tab", ipcNewTabHandler) catch {};
+        server.registerHandler("list_windows", ipcListWindowsHandler) catch {};
 
         server.start() catch |err| {
             log.warn("IPC server start failed: {}", .{err});
@@ -242,6 +243,31 @@ pub const App = struct {
         }
 
         return socket_ipc.protocol.Response.okEmpty();
+    }
+
+    /// IPC handler for list_windows action.
+    /// On embedded/macOS, window management is handled by Swift.
+    /// This returns basic information based on the surface count.
+    fn ipcListWindowsHandler(
+        ctx: *anyopaque,
+        alloc: std.mem.Allocator,
+        _: ?std.json.Value,
+    ) socket_ipc.protocol.Response {
+        const self: *App = @ptrCast(@alignCast(ctx));
+
+        // On embedded, we don't have direct access to window information.
+        // Return a single "window" representing all surfaces.
+        const surface_count = self.core_app.surfaces.items.len;
+        const has_focused = self.core_app.focusedSurface() != null;
+
+        var window_infos = [_]socket_ipc.actions.list_windows.WindowInfo{.{
+            .id = 0,
+            .tab_count = @intCast(surface_count),
+            .active_tab = 0,
+            .focused = has_focused,
+        }};
+
+        return socket_ipc.actions.list_windows.buildResponse(alloc, &window_infos);
     }
 
     /// Returns true if there are any global keybinds in the configuration.

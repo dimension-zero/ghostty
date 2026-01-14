@@ -1533,6 +1533,7 @@ pub const Application = extern struct {
         server.registerHandler("echo", socket_ipc.server.echoHandler) catch {};
         server.registerHandler("get_cwd", ipcGetCwdHandler) catch {};
         server.registerHandler("new_tab", ipcNewTabHandler) catch {};
+        server.registerHandler("list_windows", ipcListWindowsHandler) catch {};
 
         // Start listening
         server.start() catch |err| {
@@ -1609,6 +1610,70 @@ pub const Application = extern struct {
         }
 
         return socket_ipc.protocol.Response.okEmpty();
+    }
+
+    /// IPC handler for list_windows action.
+    fn ipcListWindowsHandler(
+        ctx: *anyopaque,
+        alloc: std.mem.Allocator,
+        _: ?std.json.Value,
+    ) socket_ipc.protocol.Response {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        const priv = self.private();
+
+        // Get the list of windows from GTK Application
+        const windows_list: ?*glib.List = self.as(gtk.Application).getWindows();
+
+        var window_infos = std.ArrayList(socket_ipc.actions.list_windows.WindowInfo).init(alloc);
+        defer window_infos.deinit();
+
+        // Get the focused surface to determine which window is focused
+        const focused_surface = priv.core_app.focusedSurface();
+
+        // Iterate through windows
+        var id: u32 = 0;
+        var iter = windows_list;
+        while (iter) |list| {
+            const widget: *gtk.Widget = @ptrCast(list.f_data orelse {
+                iter = list.f_next;
+                continue;
+            });
+
+            // Check if this is a GhosttyWindow
+            const window = gobject.ext.cast(Window, widget) orelse {
+                iter = list.f_next;
+                continue;
+            };
+
+            // Get window's private data for tab info
+            const win_priv = window.private();
+            const tab_count: u32 = @intCast(win_priv.tab_view.getNPages());
+            const active_page = win_priv.tab_view.getSelectedPage();
+            const active_tab: u32 = if (active_page) |page|
+                @intCast(win_priv.tab_view.getPagePosition(page))
+            else
+                0;
+
+            // Check if this window contains the focused surface
+            const is_focused = if (focused_surface) |fs|
+                ext.getAncestor(Window, fs.rt_surface.surface.as(gtk.Widget)) == window
+            else
+                false;
+
+            window_infos.append(.{
+                .id = id,
+                .tab_count = tab_count,
+                .active_tab = active_tab,
+                .focused = is_focused,
+            }) catch {
+                return socket_ipc.protocol.Response.err("Out of memory");
+            };
+
+            id += 1;
+            iter = list.f_next;
+        }
+
+        return socket_ipc.actions.list_windows.buildResponse(alloc, window_infos.items);
     }
 
     fn activate(self: *Self) callconv(.c) void {

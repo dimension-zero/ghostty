@@ -5,6 +5,7 @@
 
 pub const get_cwd = @import("get_cwd.zig");
 pub const new_tab = @import("new_tab.zig");
+pub const list_windows = @import("list_windows.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());
