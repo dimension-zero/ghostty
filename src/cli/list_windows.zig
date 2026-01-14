@@ -16,6 +16,9 @@ pub const Options = struct {
     /// Output in JSON format for scripting.
     json: bool = false,
 
+    /// Show detailed output including per-surface CWD and split info.
+    detailed: bool = false,
+
     /// Enables "-h" and "--help" to work.
     pub fn help(self: Options) !void {
         _ = self;
@@ -97,8 +100,16 @@ fn runArgs(
         return 1;
     }
 
+    // Build request params
+    var params_obj = std.json.ObjectMap.init(alloc);
+    params_obj.put("detailed", .{ .bool = opts.detailed }) catch {
+        stderr.writeAll("Out of memory\n") catch {};
+        return 1;
+    };
+    const params: std.json.Value = .{ .object = params_obj };
+
     // Send the list_windows request
-    const response = cli_ipc.call(alloc, "list_windows", null) catch |err| {
+    const response = cli_ipc.call(alloc, "list_windows", params) catch |err| {
         if (opts.json) {
             stdout.print("{{\"success\":false,\"error\":\"{}\"}}\n", .{err}) catch {};
         } else {
@@ -122,7 +133,7 @@ fn runArgs(
         }
 
         if (response.data) |data| {
-            printHumanOutput(stdout, data) catch |err| {
+            printHumanOutput(stdout, data, opts.detailed) catch |err| {
                 stderr.print("Error writing output: {}\n", .{err}) catch {};
                 return 1;
             };
@@ -135,7 +146,7 @@ fn runArgs(
 }
 
 /// Print human-readable window list.
-fn printHumanOutput(stdout: *std.Io.Writer, data: std.json.Value) !void {
+fn printHumanOutput(stdout: *std.Io.Writer, data: std.json.Value, detailed: bool) !void {
     // Expect data to be an object with "windows" array
     if (data != .object) {
         try stdout.writeAll("Invalid response format\n");
@@ -161,13 +172,9 @@ fn printHumanOutput(stdout: *std.Io.Writer, data: std.json.Value) !void {
         if (win != .object) continue;
 
         const id = win.object.get("id");
-        const tab_count = win.object.get("tab_count");
-        const active_tab = win.object.get("active_tab");
         const focused = win.object.get("focused");
 
         const id_val: i64 = if (id) |v| if (v == .integer) v.integer else 0 else 0;
-        const tab_val: i64 = if (tab_count) |v| if (v == .integer) v.integer else 0 else 0;
-        const active_val: i64 = if (active_tab) |v| if (v == .integer) v.integer else 0 else 0;
         const focused_val: bool = if (focused) |v| if (v == .bool) v.bool else false else false;
 
         if (focused_val) {
@@ -175,6 +182,73 @@ fn printHumanOutput(stdout: *std.Io.Writer, data: std.json.Value) !void {
         } else {
             try stdout.print("Window {d}\n", .{id_val});
         }
-        try stdout.print("  Tabs: {d}, Active: {d}\n", .{ tab_val, active_val });
+
+        if (detailed) {
+            // Detailed output with tabs and surfaces
+            try printDetailedTabs(stdout, win);
+        } else {
+            // Basic output with tab count
+            const tab_count = win.object.get("tab_count");
+            const active_tab = win.object.get("active_tab");
+            const tab_val: i64 = if (tab_count) |v| if (v == .integer) v.integer else 0 else 0;
+            const active_val: i64 = if (active_tab) |v| if (v == .integer) v.integer else 0 else 0;
+            try stdout.print("  Tabs: {d}, Active: {d}\n", .{ tab_val, active_val });
+        }
     }
+}
+
+/// Print detailed tab and surface information.
+fn printDetailedTabs(stdout: *std.Io.Writer, win: std.json.Value) !void {
+    const tabs = win.object.get("tabs") orelse return;
+    if (tabs != .array) return;
+
+    for (tabs.array, 0..) |tab, tab_idx| {
+        if (tab != .object) continue;
+
+        const active = tab.object.get("active");
+        const active_val: bool = if (active) |v| if (v == .bool) v.bool else false else false;
+
+        if (active_val) {
+            try stdout.print("  Tab {d} [active]\n", .{tab_idx});
+        } else {
+            try stdout.print("  Tab {d}\n", .{tab_idx});
+        }
+
+        const surfaces = tab.object.get("surfaces") orelse continue;
+        if (surfaces != .array) continue;
+
+        for (surfaces.array) |surface| {
+            if (surface != .object) continue;
+            try printSurfaceInfo(stdout, surface);
+        }
+    }
+}
+
+/// Print single surface information.
+fn printSurfaceInfo(stdout: *std.Io.Writer, surface: std.json.Value) !void {
+    const title_val = surface.object.get("title");
+    const cwd_val = surface.object.get("cwd");
+    const is_focused = surface.object.get("is_focused");
+    const split_side = surface.object.get("split_side");
+
+    const title: []const u8 = if (title_val) |v| if (v == .string) v.string else "(untitled)" else "(untitled)";
+    const cwd: []const u8 = if (cwd_val) |v| if (v == .string) v.string else "?" else "?";
+    const focused: bool = if (is_focused) |v| if (v == .bool) v.bool else false else false;
+
+    // Build prefix for split indication
+    var prefix: []const u8 = "    ";
+    if (split_side) |side| {
+        if (side == .string) {
+            if (std.mem.eql(u8, side.string, "right") or std.mem.eql(u8, side.string, "down")) {
+                prefix = "    +- ";
+            }
+        }
+    }
+
+    if (focused) {
+        try stdout.print("{s}{s} [focused]\n", .{ prefix, title });
+    } else {
+        try stdout.print("{s}{s}\n", .{ prefix, title });
+    }
+    try stdout.print("{s}  cwd: {s}\n", .{ prefix, cwd });
 }

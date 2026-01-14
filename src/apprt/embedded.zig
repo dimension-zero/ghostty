@@ -255,23 +255,73 @@ pub const App = struct {
     fn ipcListWindowsHandler(
         ctx: *anyopaque,
         alloc: std.mem.Allocator,
-        _: ?std.json.Value,
+        params: ?std.json.Value,
     ) socket_ipc.protocol.Response {
         const self: *App = @ptrCast(@alignCast(ctx));
+
+        // Parse detailed parameter
+        const detailed: bool = if (params) |p| blk: {
+            if (p != .object) break :blk false;
+            const detail_val = p.object.get("detailed") orelse break :blk false;
+            if (detail_val != .bool) break :blk false;
+            break :blk detail_val.bool;
+        } else false;
 
         // On embedded, we don't have direct access to window information.
         // Return a single "window" representing all surfaces.
         const surface_count = self.core_app.surfaces.items.len;
-        const has_focused = self.core_app.focusedSurface() != null;
+        const focused_surface = self.core_app.focusedSurface();
+        const has_focused = focused_surface != null;
 
-        var window_infos = [_]socket_ipc.actions.list_windows.WindowInfo{.{
-            .id = 0,
-            .tab_count = @intCast(surface_count),
-            .active_tab = 0,
-            .focused = has_focused,
-        }};
+        if (detailed) {
+            // Rich output with surface details
+            var surfaces = std.ArrayList(socket_ipc.actions.list_windows.SurfaceInfo).init(alloc);
+            defer surfaces.deinit();
 
-        return socket_ipc.actions.list_windows.buildResponse(alloc, &window_infos);
+            var surf_id: u32 = 0;
+            for (self.core_app.surfaces.items) |core_surf| {
+                const pwd = core_surf.pwd(alloc) catch null;
+                const is_focused = if (focused_surface) |fs| fs == core_surf else false;
+
+                surfaces.append(.{
+                    .id = surf_id,
+                    .title = null, // Title not directly available in embedded
+                    .cwd = pwd,
+                    .is_focused = is_focused,
+                    .split_side = null,
+                }) catch {
+                    return socket_ipc.protocol.Response.err("Out of memory");
+                };
+                surf_id += 1;
+            }
+
+            // Single tab containing all surfaces
+            var tabs = [_]socket_ipc.actions.list_windows.TabInfo{.{
+                .id = 0,
+                .active = true,
+                .surfaces = surfaces.toOwnedSlice() catch {
+                    return socket_ipc.protocol.Response.err("Out of memory");
+                },
+            }};
+
+            var windows = [_]socket_ipc.actions.list_windows.RichWindowInfo{.{
+                .id = 0,
+                .focused = has_focused,
+                .tabs = &tabs,
+            }};
+
+            return socket_ipc.actions.list_windows.buildRichResponse(alloc, &windows);
+        } else {
+            // Basic output
+            var window_infos = [_]socket_ipc.actions.list_windows.WindowInfo{.{
+                .id = 0,
+                .tab_count = @intCast(surface_count),
+                .active_tab = 0,
+                .focused = has_focused,
+            }};
+
+            return socket_ipc.actions.list_windows.buildResponse(alloc, &window_infos);
+        }
     }
 
     /// IPC handler for close_tab action.

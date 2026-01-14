@@ -1620,21 +1620,43 @@ pub const Application = extern struct {
     fn ipcListWindowsHandler(
         ctx: *anyopaque,
         alloc: std.mem.Allocator,
-        _: ?std.json.Value,
+        params: ?std.json.Value,
     ) socket_ipc.protocol.Response {
         const self: *Self = @ptrCast(@alignCast(ctx));
         const priv = self.private();
 
+        // Parse detailed parameter
+        const detailed: bool = if (params) |p| blk: {
+            if (p != .object) break :blk false;
+            const detail_val = p.object.get("detailed") orelse break :blk false;
+            if (detail_val != .bool) break :blk false;
+            break :blk detail_val.bool;
+        } else false;
+
         // Get the list of windows from GTK Application
         const windows_list: ?*glib.List = self.as(gtk.Application).getWindows();
-
-        var window_infos = std.ArrayList(socket_ipc.actions.list_windows.WindowInfo).init(alloc);
-        defer window_infos.deinit();
 
         // Get the focused surface to determine which window is focused
         const focused_surface = priv.core_app.focusedSurface();
 
-        // Iterate through windows
+        if (detailed) {
+            // Rich output with tabs and surfaces
+            return buildDetailedResponse(alloc, windows_list, focused_surface);
+        } else {
+            // Basic output
+            return buildBasicResponse(alloc, windows_list, focused_surface);
+        }
+    }
+
+    /// Build basic window info response (3-star format).
+    fn buildBasicResponse(
+        alloc: std.mem.Allocator,
+        windows_list: ?*glib.List,
+        focused_surface: ?*CoreSurface,
+    ) socket_ipc.protocol.Response {
+        var window_infos = std.ArrayList(socket_ipc.actions.list_windows.WindowInfo).init(alloc);
+        defer window_infos.deinit();
+
         var id: u32 = 0;
         var iter = windows_list;
         while (iter) |list| {
@@ -1643,13 +1665,11 @@ pub const Application = extern struct {
                 continue;
             });
 
-            // Check if this is a GhosttyWindow
             const window = gobject.ext.cast(Window, widget) orelse {
                 iter = list.f_next;
                 continue;
             };
 
-            // Get window's private data for tab info
             const win_priv = window.private();
             const tab_count: u32 = @intCast(win_priv.tab_view.getNPages());
             const active_page = win_priv.tab_view.getSelectedPage();
@@ -1658,7 +1678,6 @@ pub const Application = extern struct {
             else
                 0;
 
-            // Check if this window contains the focused surface
             const is_focused = if (focused_surface) |fs|
                 ext.getAncestor(Window, fs.rt_surface.surface.as(gtk.Widget)) == window
             else
@@ -1678,6 +1697,110 @@ pub const Application = extern struct {
         }
 
         return socket_ipc.actions.list_windows.buildResponse(alloc, window_infos.items);
+    }
+
+    /// Build detailed window info response (4-star format).
+    fn buildDetailedResponse(
+        alloc: std.mem.Allocator,
+        windows_list: ?*glib.List,
+        focused_surface: ?*CoreSurface,
+    ) socket_ipc.protocol.Response {
+        var rich_windows = std.ArrayList(socket_ipc.actions.list_windows.RichWindowInfo).init(alloc);
+        defer rich_windows.deinit();
+
+        var win_id: u32 = 0;
+        var win_iter = windows_list;
+        while (win_iter) |list| {
+            const widget: *gtk.Widget = @ptrCast(list.f_data orelse {
+                win_iter = list.f_next;
+                continue;
+            });
+
+            const window = gobject.ext.cast(Window, widget) orelse {
+                win_iter = list.f_next;
+                continue;
+            };
+
+            const win_priv = window.private();
+            const is_win_focused = if (focused_surface) |fs|
+                ext.getAncestor(Window, fs.rt_surface.surface.as(gtk.Widget)) == window
+            else
+                false;
+
+            // Collect tabs for this window
+            var tabs = std.ArrayList(socket_ipc.actions.list_windows.TabInfo).init(alloc);
+            const n_pages = win_priv.tab_view.getNPages();
+            const active_page = win_priv.tab_view.getSelectedPage();
+
+            var tab_idx: u32 = 0;
+            while (tab_idx < @as(u32, @intCast(n_pages))) : (tab_idx += 1) {
+                const page = win_priv.tab_view.getNthPage(@intCast(tab_idx)) orelse continue;
+                const tab_widget = page.getChild() orelse continue;
+                const tab = gobject.ext.cast(Tab, tab_widget) orelse continue;
+
+                const is_active = if (active_page) |ap| ap == page else false;
+
+                // Collect surfaces from this tab's split tree
+                var surfaces = std.ArrayList(socket_ipc.actions.list_windows.SurfaceInfo).init(alloc);
+                const split_tree = tab.getSplitTree();
+                const tree = split_tree.getTree();
+
+                if (tree) |t| {
+                    var surf_id: u32 = 0;
+                    var tree_iter = t.iterator();
+                    while (tree_iter.next()) |entry| {
+                        const surface = entry.view;
+                        const core_surface = surface.core_surface orelse continue;
+
+                        // Get surface metadata
+                        const title = surface.getTitle();
+                        const pwd = core_surface.pwd(alloc) catch null;
+
+                        const is_surf_focused = if (focused_surface) |fs|
+                            fs == core_surface
+                        else
+                            false;
+
+                        surfaces.append(.{
+                            .id = surf_id,
+                            .title = title,
+                            .cwd = pwd,
+                            .is_focused = is_surf_focused,
+                            .split_side = null, // TODO: track split direction
+                        }) catch {
+                            return socket_ipc.protocol.Response.err("Out of memory");
+                        };
+
+                        surf_id += 1;
+                    }
+                }
+
+                tabs.append(.{
+                    .id = tab_idx,
+                    .active = is_active,
+                    .surfaces = surfaces.toOwnedSlice() catch {
+                        return socket_ipc.protocol.Response.err("Out of memory");
+                    },
+                }) catch {
+                    return socket_ipc.protocol.Response.err("Out of memory");
+                };
+            }
+
+            rich_windows.append(.{
+                .id = win_id,
+                .focused = is_win_focused,
+                .tabs = tabs.toOwnedSlice() catch {
+                    return socket_ipc.protocol.Response.err("Out of memory");
+                },
+            }) catch {
+                return socket_ipc.protocol.Response.err("Out of memory");
+            };
+
+            win_id += 1;
+            win_iter = list.f_next;
+        }
+
+        return socket_ipc.actions.list_windows.buildRichResponse(alloc, rich_windows.items);
     }
 
     /// IPC handler for close_tab action.
