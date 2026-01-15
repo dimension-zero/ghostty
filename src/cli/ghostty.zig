@@ -23,6 +23,7 @@ const get_cwd = @import("get_cwd.zig");
 const new_tab = @import("new_tab.zig");
 const list_windows = @import("list_windows.zig");
 const new_split = @import("new_split.zig");
+const watch = @import("watch.zig");
 
 /// Special commands that can be invoked via CLI flags. These are all
 /// invoked by using `+<action>` as a CLI flag. The only exception is
@@ -84,6 +85,9 @@ pub const Action = enum {
 
     // Create a new split in the focused terminal.
     @"new-split",
+
+    // Subscribe to real-time events from Ghostty.
+    watch,
 
     pub fn detectSpecialCase(arg: []const u8) ?SpecialCase(Action) {
         // If we see a "-e" and we haven't seen a command yet, then
@@ -167,6 +171,7 @@ pub const Action = enum {
             .@"new-tab" => try new_tab.run(alloc),
             .@"list-windows" => try list_windows.run(alloc),
             .@"new-split" => try new_split.run(alloc),
+            .watch => try watch.run(alloc),
         };
     }
 
@@ -210,6 +215,7 @@ pub const Action = enum {
                 .@"new-tab" => new_tab.Options,
                 .@"list-windows" => list_windows.Options,
                 .@"new-split" => new_split.Options,
+                .watch => watch.Options,
             };
         }
     }

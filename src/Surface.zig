@@ -36,6 +36,7 @@ const App = @import("App.zig");
 const internal_os = @import("os/main.zig");
 const inspectorpkg = @import("inspector/main.zig");
 const SurfaceMouse = @import("surface_mouse.zig");
+const ipc = @import("apprt/ipc/main.zig");
 
 const log = std.log.scoped(.surface);
 
@@ -1052,6 +1053,11 @@ pub fn handleMessage(self: *Surface, msg: Message) !void {
                 .pwd,
                 .{ .pwd = str },
             );
+
+            // Broadcast pwd_change event to IPC subscribers
+            if (self.rt_app.getIpcServer()) |server| {
+                server.broadcastEvent(.pwd_change, .{ .string = str });
+            }
         },
 
         .close => self.close(),

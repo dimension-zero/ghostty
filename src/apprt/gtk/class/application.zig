@@ -802,6 +802,14 @@ pub const Application = extern struct {
         return self.private().transient_cgroup_base;
     }
 
+    /// Returns the IPC server (if running).
+    pub fn getIpcServer(self: *Self) ?*socket_ipc.Server {
+        if (self.private().ipc_server) |*server| {
+            return server;
+        }
+        return null;
+    }
+
     /// This will get called when there are no more open surfaces.
     fn startQuitTimer(self: *Self) void {
         const priv = self.private();

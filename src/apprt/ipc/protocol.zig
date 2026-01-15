@@ -104,6 +104,59 @@ pub const ErrorCode = enum {
     protocol,
 };
 
+/// Event types for subscription-based notifications.
+pub const EventType = enum {
+    /// Working directory changed (OSC 7).
+    pwd_change,
+
+    // Future event types:
+    // tab_created,
+    // tab_closed,
+    // window_focus,
+
+    /// Convert to string for JSON serialization.
+    pub fn toString(self: EventType) []const u8 {
+        return switch (self) {
+            .pwd_change => "pwd_change",
+        };
+    }
+
+    /// Parse from string.
+    pub fn fromString(s: []const u8) ?EventType {
+        if (std.mem.eql(u8, s, "pwd_change")) return .pwd_change;
+        return null;
+    }
+};
+
+/// Event notification sent from server to subscribed clients.
+pub const Event = struct {
+    /// Type of event.
+    event_type: []const u8,
+
+    /// Event data (type-specific).
+    data: ?std.json.Value = null,
+
+    /// Create an event with the given type and data.
+    pub fn init(event_type: EventType, data: ?std.json.Value) Event {
+        return .{
+            .event_type = event_type.toString(),
+            .data = data,
+        };
+    }
+
+    /// Serialize event to JSON.
+    pub fn serialize(self: Event, alloc: Allocator) Allocator.Error![]const u8 {
+        var buf = std.ArrayList(u8).init(alloc);
+        errdefer buf.deinit();
+
+        std.json.stringify(self, .{}, buf.writer()) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+
+        return buf.toOwnedSlice();
+    }
+};
+
 /// Read a newline-delimited message from a reader.
 pub fn readMessage(alloc: Allocator, reader: anytype) !?[]const u8 {
     var buf = std.ArrayList(u8).init(alloc);

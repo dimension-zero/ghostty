@@ -214,6 +214,14 @@ pub const App = struct {
         }
     }
 
+    /// Get the IPC server for broadcasting events to subscribers.
+    pub fn getIpcServer(self: *App) ?*socket_ipc.Server {
+        if (self.ipc_server) |*server| {
+            return server;
+        }
+        return null;
+    }
+
     /// IPC handler for get_cwd action.
     fn ipcGetCwdHandler(
         ctx: *anyopaque,

@@ -97,3 +97,8 @@ pub fn performIpc(
 pub fn redrawInspector(_: *App, surface: *Surface) void {
     surface.redrawInspector();
 }
+
+/// Get the IPC server for broadcasting events to subscribers.
+pub fn getIpcServer(self: *App) ?*@import("../ipc/main.zig").Server {
+    return self.app.getIpcServer();
+}
