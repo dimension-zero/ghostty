@@ -60,7 +60,7 @@ pub fn run(alloc: Allocator) !u8 {
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
     const stdout = &stdout_writer.interface;
 
-    const result = runArgs(alloc, &iter, stdout, stderr);
+    const result = try runArgs(alloc, &iter, stdout, stderr);
 
     stdout.flush() catch {};
     stderr.flush() catch {};
@@ -73,7 +73,7 @@ fn runArgs(
     argsIter: anytype,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
-) u8 {
+) !u8 {
     var opts: Options = .{};
 
     args.parse(Options, alloc_gpa, &opts, argsIter) catch |err| switch (err) {

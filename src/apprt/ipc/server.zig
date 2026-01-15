@@ -176,8 +176,7 @@ pub const Server = struct {
             if (!subscriber.events.contains(event_type)) continue;
 
             // Try to write event to subscriber
-            const stream = std.posix.SocketHandle{ .handle = subscriber.fd };
-            var writer = std.net.Stream{ .handle = stream.handle }.writer();
+            const writer = Socket.writerFromFd(subscriber.fd);
             protocol.writeMessage(writer, event_data) catch {
                 // Subscriber disconnected, remove it
                 log.debug("Subscriber fd={} disconnected, removing", .{subscriber.fd});

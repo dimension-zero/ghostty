@@ -161,6 +161,22 @@ pub const Socket = struct {
         };
     }
 
+    /// Get a writer for a raw file descriptor (for use with subscriber fds).
+    pub fn writerFromFd(fd: posix.fd_t) std.io.AnyWriter {
+        return .{
+            .context = @ptrFromInt(@as(usize, @intCast(fd))),
+            .writeFn = struct {
+                fn write(ctx: *const anyopaque, buf: []const u8) anyerror!usize {
+                    const sock_fd: posix.fd_t = @intCast(@intFromPtr(ctx));
+                    return posix.write(sock_fd, buf) catch |err| {
+                        log.debug("Socket write error: {}", .{err});
+                        return err;
+                    };
+                }
+            }.write,
+        };
+    }
+
     /// Send data on the socket.
     pub fn send(self: Socket, data: []const u8) SocketError!void {
         var total_sent: usize = 0;
