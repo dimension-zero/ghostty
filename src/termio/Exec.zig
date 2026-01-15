@@ -58,6 +58,16 @@ pub fn deinit(self: *Exec) void {
     self.subprocess.deinit();
 }
 
+/// Returns the PID of the child process, if it has been started.
+/// This is useful for querying process CWD when OSC 7 is unavailable.
+pub fn getChildPid(self: *const Exec) ?posix.pid_t {
+    const process = self.subprocess.process orelse return null;
+    return switch (process) {
+        .fork_exec => |cmd| cmd.pid,
+        .flatpak => null, // Flatpak processes run on host, PID not accessible
+    };
+}
+
 /// Call to initialize the terminal state as necessary for this backend.
 /// This is called before any termio begins. This should not be called
 /// after termio begins because it may put the internal terminal state

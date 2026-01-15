@@ -36,6 +36,7 @@ pub const protocol = @import("protocol.zig");
 pub const path = @import("path.zig");
 pub const server = @import("server.zig");
 pub const actions = @import("actions/main.zig");
+pub const process_cwd = @import("process_cwd.zig");
 
 pub const Socket = socket.Socket;
 pub const Client = socket.Client;

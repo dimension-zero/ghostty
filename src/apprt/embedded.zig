@@ -298,7 +298,11 @@ pub const App = struct {
 
             var surf_id: u32 = 0;
             for (self.core_app.surfaces.items) |core_surf| {
-                const pwd = core_surf.pwd(alloc) catch null;
+                // Try OSC 7 pwd first, fall back to process CWD
+                const pwd = core_surf.pwd(alloc) catch null orelse blk: {
+                    const child_pid = core_surf.getChildPid() orelse break :blk null;
+                    break :blk socket_ipc.process_cwd.getProcessCwd(alloc, child_pid);
+                };
                 const is_focused = if (focused_surface) |fs| fs == core_surf else false;
 
                 surfaces.append(.{

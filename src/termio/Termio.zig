@@ -315,6 +315,12 @@ pub fn deinit(self: *Termio) void {
     if (self.thread_enter_state) |v| v.destroy();
 }
 
+/// Returns the PID of the child process, if available.
+/// This is useful for querying process CWD when OSC 7 is unavailable.
+pub fn getChildPid(self: *const Termio) ?posix.pid_t {
+    return self.backend.getChildPid();
+}
+
 pub fn threadEnter(
     self: *Termio,
     thread: *termio.Thread,

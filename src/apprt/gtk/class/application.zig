@@ -1772,7 +1772,12 @@ pub const Application = extern struct {
 
                         // Get surface metadata
                         const title = surface.getTitle();
-                        const pwd = core_surface.pwd(alloc) catch null;
+
+                        // Try OSC 7 pwd first, fall back to process CWD
+                        const pwd = core_surface.pwd(alloc) catch null orelse blk: {
+                            const child_pid = core_surface.getChildPid() orelse break :blk null;
+                            break :blk socket_ipc.process_cwd.getProcessCwd(alloc, child_pid);
+                        };
 
                         const is_surf_focused = if (focused_surface) |fs|
                             fs == core_surface

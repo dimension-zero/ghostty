@@ -100,6 +100,13 @@ pub const Backend = union(Kind) {
             ),
         }
     }
+
+    /// Returns the PID of the child process, if available.
+    pub fn getChildPid(self: *const Backend) ?posix.pid_t {
+        return switch (self.*) {
+            .exec => |*exec| exec.getChildPid(),
+        };
+    }
 };
 
 /// Termio thread data. See termio.ThreadData for docs.

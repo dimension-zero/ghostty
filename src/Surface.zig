@@ -2059,6 +2059,12 @@ pub fn pwd(
     return try alloc.dupe(u8, terminal_pwd);
 }
 
+/// Returns the PID of the child process (shell), if available.
+/// This is useful for querying process CWD when OSC 7 is unavailable.
+pub fn getChildPid(self: *const Surface) ?std.posix.pid_t {
+    return self.io.getChildPid();
+}
+
 /// Resolves a relative file path to an absolute path using the terminal's pwd.
 fn resolvePathForOpening(
     self: *Surface,
